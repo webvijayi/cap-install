@@ -164,16 +164,73 @@ check_port_available() {
 					;;
 				2)
 					echo ""
-					echo "To integrate Cap with Apache, add this to your Apache config:"
+					echo "================================================================================"
+					echo "                    Apache Reverse Proxy Configuration"
+					echo "================================================================================"
 					echo ""
-					echo "  <VirtualHost *:80>"
-					echo "    ServerName cap.yourdomain.com"
-					echo "    ProxyPass / http://localhost:3000/"
-					echo "    ProxyPassReverse / http://localhost:3000/"
-					echo "  </VirtualHost>"
+					echo "Cap will install on port 3000 (internal only)."
+					echo "You'll configure Apache to proxy requests to Cap."
 					echo ""
-					echo "After configuring Apache, re-run this script and choose option 1."
-					exit 0
+					read -p "Enter your domain for Cap (e.g., cap.yourdomain.com): " CAP_DOMAIN
+
+					if [[ -z "$CAP_DOMAIN" ]]; then
+						echo "Error: Domain is required for reverse proxy setup."
+						exit 1
+					fi
+
+					APACHE_CONFIG_FILE="/etc/apache2/sites-available/${CAP_DOMAIN}.conf"
+					if [[ -f /etc/httpd/conf.d/ ]]; then
+						APACHE_CONFIG_FILE="/etc/httpd/conf.d/${CAP_DOMAIN}.conf"
+					fi
+
+					echo ""
+					echo "Creating Apache configuration at: $APACHE_CONFIG_FILE"
+
+					cat > "$APACHE_CONFIG_FILE" << EOF
+<VirtualHost *:80>
+    ServerName ${CAP_DOMAIN}
+
+    # Enable proxy modules
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:3000/
+    ProxyPassReverse / http://localhost:3000/
+
+    # WebSocket support (required for Cap)
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    RewriteRule ^/?(.*) "ws://localhost:3000/\$1" [P,L]
+
+    ErrorLog \${APACHE_LOG_DIR}/${CAP_DOMAIN}-error.log
+    CustomLog \${APACHE_LOG_DIR}/${CAP_DOMAIN}-access.log combined
+</VirtualHost>
+EOF
+
+					echo "✓ Apache config created"
+					echo ""
+					echo "Enabling required Apache modules and site..."
+
+					# Enable required modules
+					if command -v a2enmod >/dev/null 2>&1; then
+						a2enmod proxy >/dev/null 2>&1
+						a2enmod proxy_http >/dev/null 2>&1
+						a2enmod proxy_wstunnel >/dev/null 2>&1
+						a2enmod rewrite >/dev/null 2>&1
+						a2ensite "${CAP_DOMAIN}.conf" >/dev/null 2>&1
+						systemctl reload apache2 >/dev/null 2>&1 || systemctl reload httpd >/dev/null 2>&1
+						echo "✓ Apache modules enabled and configuration loaded"
+					else
+						echo "⚠️  Manual step required: Enable proxy modules in Apache"
+						echo "   Run: systemctl reload httpd"
+					fi
+
+					echo ""
+					echo "✓ Cap will be accessible at: http://${CAP_DOMAIN}"
+					echo ""
+					echo "Continuing with installation (Cap on internal port 3000)..."
+					HTTP_PORT=3000
+					HTTPS_PORT=3001
+					SKIP_NGINX=1
 					;;
 				3)
 					echo ""
@@ -228,20 +285,89 @@ check_port_available() {
 					;;
 				2)
 					echo ""
-					echo "To integrate Cap with Nginx, add this to your Nginx config:"
+					echo "================================================================================"
+					echo "                    Nginx Reverse Proxy Configuration"
+					echo "================================================================================"
 					echo ""
-					echo "  server {"
-					echo "    listen 80;"
-					echo "    server_name cap.yourdomain.com;"
-					echo "    location / {"
-					echo "      proxy_pass http://localhost:3000;"
-					echo "      proxy_set_header Host \$host;"
-					echo "      proxy_set_header X-Real-IP \$remote_addr;"
-					echo "    }"
-					echo "  }"
+					echo "Cap will install on port 3000 (internal only)."
+					echo "You'll configure Nginx to proxy requests to Cap."
 					echo ""
-					echo "After configuring Nginx, re-run this script and choose option 1."
-					exit 0
+					read -p "Enter your domain for Cap (e.g., cap.yourdomain.com): " CAP_DOMAIN
+
+					if [[ -z "$CAP_DOMAIN" ]]; then
+						echo "Error: Domain is required for reverse proxy setup."
+						exit 1
+					fi
+
+					NGINX_CONFIG_FILE="/etc/nginx/sites-available/${CAP_DOMAIN}"
+					NGINX_ENABLED_FILE="/etc/nginx/sites-enabled/${CAP_DOMAIN}"
+
+					# Check for different nginx config locations
+					if [[ ! -d /etc/nginx/sites-available ]]; then
+						NGINX_CONFIG_FILE="/etc/nginx/conf.d/${CAP_DOMAIN}.conf"
+						NGINX_ENABLED_FILE=""
+					fi
+
+					echo ""
+					echo "Creating Nginx configuration at: $NGINX_CONFIG_FILE"
+
+					cat > "$NGINX_CONFIG_FILE" << 'EOF'
+server {
+    listen 80;
+    server_name CAP_DOMAIN_PLACEHOLDER;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # MinIO S3 endpoint
+    location /s3 {
+        proxy_pass http://localhost:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+					# Replace placeholder with actual domain
+					sed -i "s/CAP_DOMAIN_PLACEHOLDER/${CAP_DOMAIN}/g" "$NGINX_CONFIG_FILE"
+
+					echo "✓ Nginx config created"
+
+					# Enable site if using sites-available/sites-enabled structure
+					if [[ -n "$NGINX_ENABLED_FILE" ]]; then
+						ln -sf "$NGINX_CONFIG_FILE" "$NGINX_ENABLED_FILE" 2>/dev/null
+					fi
+
+					# Test and reload nginx
+					if nginx -t >/dev/null 2>&1; then
+						systemctl reload nginx >/dev/null 2>&1
+						echo "✓ Nginx configuration loaded"
+					else
+						echo "⚠️  Nginx config test failed. Please check manually:"
+						echo "   nginx -t"
+						echo "   systemctl reload nginx"
+					fi
+
+					echo ""
+					echo "✓ Cap will be accessible at: http://${CAP_DOMAIN}"
+					echo ""
+					echo "Continuing with installation (Cap on internal port 3000)..."
+					HTTP_PORT=3000
+					HTTPS_PORT=3001
+					SKIP_NGINX=1
 					;;
 				3)
 					echo ""
@@ -737,7 +863,10 @@ echo "[4/10] Creating installation directory..."
 mkdir -p "$INSTALL_DIR"
 
 # Determine external endpoint
-if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
+if [[ "$SKIP_NGINX" == "1" && -n "$CAP_DOMAIN" ]]; then
+	# Using external reverse proxy with custom domain
+	EXTERNAL_ENDPOINT="http://${CAP_DOMAIN}"
+elif [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
 	EXTERNAL_ENDPOINT="https://${DOMAIN}"
 	# Add port if not standard 443
 	if [[ $HTTPS_PORT -ne 443 ]]; then
@@ -746,7 +875,7 @@ if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
 else
 	EXTERNAL_ENDPOINT="http://${DOMAIN}"
 	# Add port if not standard 80
-	if [[ $HTTP_PORT -ne 80 ]]; then
+	if [[ $HTTP_PORT -ne 80 && $HTTP_PORT -ne 3000 ]]; then
 		EXTERNAL_ENDPOINT="${EXTERNAL_ENDPOINT}:${HTTP_PORT}"
 	fi
 fi
@@ -861,6 +990,11 @@ cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
       - "9001:9001"
     networks:
       - cap-network
+EOF
+
+# Only add nginx container if not using external reverse proxy
+if [[ "$SKIP_NGINX" != "1" ]]; then
+	cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
 
   nginx:
     image: nginx:alpine
@@ -870,30 +1004,36 @@ cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
       - "${HTTP_PORT}:80"
 EOF
 
-if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
-	cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
+	if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
+		cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
       - "${HTTPS_PORT}:443"
 EOF
-fi
+	fi
 
-cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
+	cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
     volumes:
       - ./nginx.conf:/etc/nginx/nginx.conf:ro
 EOF
 
-if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
-	cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
+	if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
+		cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
       - ./ssl:/etc/nginx/ssl:ro
       - certbot-data:/var/www/certbot:ro
 EOF
-fi
+	fi
 
-cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
+	cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
     depends_on:
       - cap-web
       - cap-minio
     networks:
       - cap-network
+EOF
+else
+	echo "# Nginx container skipped - using external reverse proxy" >> "$INSTALL_DIR/docker-compose.yml"
+fi
+
+cat >> "$INSTALL_DIR/docker-compose.yml" << 'EOF'
 
 networks:
   cap-network:
