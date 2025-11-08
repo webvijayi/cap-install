@@ -1043,6 +1043,8 @@ while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
 	fi
 done
 
+# Export ports for docker-compose
+export HTTP_PORT HTTPS_PORT
 docker compose up -d
 
 # Configure MinIO
@@ -1113,6 +1115,8 @@ echo "[Security] Credentials file secured with 600 permissions"
 # Create management scripts
 cat > "$INSTALL_DIR/cap-start.sh" << EOF
 #!/bin/bash
+export HTTP_PORT=${HTTP_PORT}
+export HTTPS_PORT=${HTTPS_PORT}
 cd ${INSTALL_DIR} && docker compose up -d
 EOF
 
