@@ -1,0 +1,5 @@
+*.bak
+*.log
+test-*.txt
+credentials.txt
+.DS_Store
