@@ -31,6 +31,42 @@ The script will automatically detect your permissions and offer appropriate inst
 
 ---
 
+## 🛡️ Production Server Safety
+
+**IMPORTANT**: This installer is designed to be **safe and non-destructive** on production servers running existing websites.
+
+### Port Conflict Protection
+
+If the installer detects Apache, Nginx, or other services on ports 80/443, it will:
+
+✅ **NEVER automatically stop your web server**
+✅ **Offer safe alternatives**:
+  1. Run Cap on port 8080 (recommended - keeps your sites running)
+  2. Provide reverse proxy config for integration
+  3. Only stop services with explicit confirmation
+
+### What Gets Checked
+
+The installer checks for conflicts on:
+- **Port 80/443**: HTTP/HTTPS (web servers)
+- **Port 3306**: MySQL (if system MySQL is running)
+- **Port 9000/9001**: MinIO (object storage)
+
+### Example: Running Alongside Existing Websites
+
+```
+Server has: Apache on port 80 serving your websites
+Cap installer detects: Apache conflict
+Options offered:
+  1) Run Cap on port 8080 ✓ SAFE - Your websites keep running
+  2) Integrate Cap with Apache (shows config example)
+  3) Stop Apache (requires typing "YES I UNDERSTAND")
+```
+
+**Default recommendation**: Always choose option 1 (alternative port) to keep your existing services running.
+
+---
+
 ## 📋 Installation Modes
 
 ### 🔧 Full Install Mode (Requires Root)

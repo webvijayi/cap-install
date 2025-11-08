@@ -140,28 +140,63 @@ check_port_available() {
 
 		# Special handling for common services
 		if echo "$process" | grep -qi "apache\|httpd"; then
-			echo "Apache web server detected on port ${port}."
+			echo "================================================================================"
+			echo "                       ⚠️  APACHE WEB SERVER DETECTED"
+			echo "================================================================================"
 			echo ""
-			echo "Options:"
-			echo "  1) Stop and disable Apache (recommended for Cap)"
-			echo "  2) Exit and manually resolve conflict"
-			read -p "Select option [1-2]: " apache_option
+			echo "Apache is running on port ${port}. This may be serving existing websites."
+			echo ""
+			echo "⚠️  WARNING: Stopping Apache will take down any websites currently running!"
+			echo ""
+			echo "Safe Options:"
+			echo "  1) Run Cap on alternative port 8080 (RECOMMENDED - Safe, non-destructive)"
+			echo "  2) Add Cap as Apache virtual host (Manual - Requires Apache configuration)"
+			echo "  3) Stop and disable Apache (DESTRUCTIVE - Will stop ALL websites)"
+			echo "  4) Exit and configure manually"
+			echo ""
+			read -p "Select option [1-4]: " apache_option
 
 			case "$apache_option" in
 				1)
-					echo "Stopping Apache..."
-					if systemctl is-active --quiet apache2; then
-						systemctl stop apache2
-						systemctl disable apache2
-					elif systemctl is-active --quiet httpd; then
-						systemctl stop httpd
-						systemctl disable httpd
-					fi
-					echo "Apache stopped and disabled."
+					echo "✓ Using alternative port 8080 for Cap (port 80 remains with Apache)"
+					HTTP_PORT=8080
+					HTTPS_PORT=8443
 					;;
 				2)
-					echo "Exiting. Please resolve the port conflict manually."
-					exit 1
+					echo ""
+					echo "To integrate Cap with Apache, add this to your Apache config:"
+					echo ""
+					echo "  <VirtualHost *:80>"
+					echo "    ServerName cap.yourdomain.com"
+					echo "    ProxyPass / http://localhost:3000/"
+					echo "    ProxyPassReverse / http://localhost:3000/"
+					echo "  </VirtualHost>"
+					echo ""
+					echo "After configuring Apache, re-run this script and choose option 1."
+					exit 0
+					;;
+				3)
+					echo ""
+					echo "⚠️  FINAL WARNING: This will STOP Apache and affect all websites!"
+					read -p "Type 'YES I UNDERSTAND' to confirm: " confirm
+					if [[ "$confirm" == "YES I UNDERSTAND" ]]; then
+						echo "Stopping Apache..."
+						if systemctl is-active --quiet apache2; then
+							systemctl stop apache2
+							systemctl disable apache2
+						elif systemctl is-active --quiet httpd; then
+							systemctl stop httpd
+							systemctl disable httpd
+						fi
+						echo "Apache stopped and disabled."
+					else
+						echo "Cancelled. Exiting."
+						exit 1
+					fi
+					;;
+				4)
+					echo "Exiting. Please configure manually."
+					exit 0
 					;;
 				*)
 					echo "Invalid option. Exiting."
@@ -169,28 +204,97 @@ check_port_available() {
 					;;
 			esac
 		elif echo "$process" | grep -qi "nginx"; then
-			echo "Nginx web server detected on port ${port}."
+			echo "================================================================================"
+			echo "                        ⚠️  NGINX WEB SERVER DETECTED"
+			echo "================================================================================"
 			echo ""
-			echo "Options:"
-			echo "  1) Stop and disable Nginx"
-			echo "  2) Exit and manually resolve conflict"
-			read -p "Select option [1-2]: " nginx_option
+			echo "Nginx is running on port ${port}. This may be serving existing websites."
+			echo ""
+			echo "⚠️  WARNING: Stopping Nginx will take down any websites currently running!"
+			echo ""
+			echo "Safe Options:"
+			echo "  1) Run Cap on alternative port 8080 (RECOMMENDED - Safe, non-destructive)"
+			echo "  2) Add Cap to existing Nginx config (Manual - Requires Nginx configuration)"
+			echo "  3) Stop and disable Nginx (DESTRUCTIVE - Will stop ALL websites)"
+			echo "  4) Exit and configure manually"
+			echo ""
+			read -p "Select option [1-4]: " nginx_option
 
 			case "$nginx_option" in
 				1)
-					echo "Stopping Nginx..."
-					systemctl stop nginx
-					systemctl disable nginx
-					echo "Nginx stopped and disabled."
+					echo "✓ Using alternative port 8080 for Cap (port 80 remains with Nginx)"
+					HTTP_PORT=8080
+					HTTPS_PORT=8443
 					;;
 				2)
-					echo "Exiting. Please resolve the port conflict manually."
+					echo ""
+					echo "To integrate Cap with Nginx, add this to your Nginx config:"
+					echo ""
+					echo "  server {"
+					echo "    listen 80;"
+					echo "    server_name cap.yourdomain.com;"
+					echo "    location / {"
+					echo "      proxy_pass http://localhost:3000;"
+					echo "      proxy_set_header Host \$host;"
+					echo "      proxy_set_header X-Real-IP \$remote_addr;"
+					echo "    }"
+					echo "  }"
+					echo ""
+					echo "After configuring Nginx, re-run this script and choose option 1."
+					exit 0
+					;;
+				3)
+					echo ""
+					echo "⚠️  FINAL WARNING: This will STOP Nginx and affect all websites!"
+					read -p "Type 'YES I UNDERSTAND' to confirm: " confirm
+					if [[ "$confirm" == "YES I UNDERSTAND" ]]; then
+						echo "Stopping Nginx..."
+						systemctl stop nginx
+						systemctl disable nginx
+						echo "Nginx stopped and disabled."
+					else
+						echo "Cancelled. Exiting."
+						exit 1
+					fi
+					;;
+				4)
+					echo "Exiting. Please configure manually."
+					exit 0
+					;;
+				*)
+					echo "Invalid option. Exiting."
 					exit 1
 					;;
 			esac
 		else
-			echo "Please stop the service using port ${port} and run this script again."
-			exit 1
+			echo "================================================================================"
+			echo "                        ⚠️  PORT ${port} CONFLICT DETECTED"
+			echo "================================================================================"
+			echo ""
+			echo "Another service is using port ${port}:"
+			echo "$process"
+			echo ""
+			echo "Options:"
+			echo "  1) Run Cap on alternative port 8080 (RECOMMENDED)"
+			echo "  2) Exit and stop the conflicting service manually"
+			echo ""
+			read -p "Select option [1-2]: " port_option
+
+			case "$port_option" in
+				1)
+					echo "✓ Using alternative port 8080 for Cap"
+					HTTP_PORT=8080
+					HTTPS_PORT=8443
+					;;
+				2)
+					echo "Exiting. Please stop the service using port ${port} and run this script again."
+					exit 1
+					;;
+				*)
+					echo "Invalid option. Exiting."
+					exit 1
+					;;
+			esac
 		fi
 	fi
 }
@@ -436,6 +540,45 @@ echo "Checking for port conflicts..."
 check_existing_mysql
 check_port_available 80 "HTTP (Nginx)"
 check_port_available 443 "HTTPS (Nginx)"
+
+# Check MinIO ports (9000 for API, 9001 for Console)
+if lsof -Pi :9000 -sTCP:LISTEN -t >/dev/null 2>&1; then
+	echo ""
+	echo "⚠️  WARNING: Port 9000 is already in use (MinIO API port)"
+	MINIO_PROCESS=$(lsof -Pi :9000 -sTCP:LISTEN | tail -n 1)
+	echo "Process: $MINIO_PROCESS"
+	echo ""
+	echo "Cap requires port 9000 for MinIO object storage (recordings)."
+	echo "This is a non-critical port and will not affect existing websites."
+	echo ""
+	echo "Options:"
+	echo "  1) Continue anyway (may cause MinIO issues)"
+	echo "  2) Exit and stop the conflicting service"
+	read -p "Select option [1-2]: " minio_option
+
+	if [[ "$minio_option" == "2" ]]; then
+		echo "Exiting. Please stop the service using port 9000."
+		exit 1
+	fi
+fi
+
+if lsof -Pi :9001 -sTCP:LISTEN -t >/dev/null 2>&1; then
+	echo ""
+	echo "⚠️  WARNING: Port 9001 is already in use (MinIO Console port)"
+	MINIO_CONSOLE_PROCESS=$(lsof -Pi :9001 -sTCP:LISTEN | tail -n 1)
+	echo "Process: $MINIO_CONSOLE_PROCESS"
+	echo ""
+	echo "This port is used for MinIO admin console (optional)."
+	echo "Options:"
+	echo "  1) Continue anyway (MinIO console won't be accessible)"
+	echo "  2) Exit and stop the conflicting service"
+	read -p "Select option [1-2]: " minio_console_option
+
+	if [[ "$minio_console_option" == "2" ]]; then
+		echo "Exiting. Please stop the service using port 9001."
+		exit 1
+	fi
+fi
 
 # Get public IP
 PUBLIC_IP=$(curl -4 -s ifconfig.me)
