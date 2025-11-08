@@ -3,6 +3,10 @@
 One-click installer for [Cap.so](https://cap.so) - the open-source Loom alternative for beautiful screen recordings.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub stars](https://img.shields.io/github/stars/webvijayi/cap-install?style=social)](https://github.com/webvijayi/cap-install/stargazers)
+[![GitHub forks](https://img.shields.io/github/forks/webvijayi/cap-install?style=social)](https://github.com/webvijayi/cap-install/network/members)
+
+**⭐ If this helped you, please star the repo!**
 
 ## 🚀 Quick Start
 
@@ -71,24 +75,35 @@ Options offered:
 
 ### 🔧 Full Install Mode (Requires Root)
 
-**Best for:** Production servers, VPS, dedicated servers
+**Best for:** Production servers, VPS, dedicated servers, servers with existing websites
 
 **Features:**
 - ✅ System-wide installation at `/opt/cap`
-- ✅ Standard ports (80/443)
+- ✅ **Smart port handling** (80/443, or 8080/8443 if conflicts detected)
+- ✅ **Apache/Nginx integration** (auto-configures reverse proxy)
+- ✅ **Production-safe** (never breaks existing websites)
 - ✅ Automatic package installation
 - ✅ Docker installation if needed
 - ✅ Firewall configuration
 - ✅ SSL/HTTPS with Let's Encrypt
 - ✅ System service management
+- ✅ WebSocket support included
+- ✅ MinIO S3 storage auto-configured
 
 **Requirements:**
 - Root access (sudo)
 - Ubuntu 20.04+, Debian 10+, CentOS 8+, Rocky Linux 8+, or Fedora
+- 2GB RAM minimum
+- 20GB disk space
 
 **Run with:**
 ```bash
 sudo bash cap-install.sh
+```
+
+**One-liner install:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/webvijayi/cap-install/main/cap-install.sh | sudo bash
 ```
 
 ---
@@ -531,6 +546,17 @@ MIT License - see [LICENSE](LICENSE) file for details
 - **Issues**: [GitHub Issues](https://github.com/webvijayi/cap-install/issues)
 - **Cap.so Discord**: [Join Community](https://discord.gg/cap)
 - **Documentation**: [cap.so/docs](https://cap.so/docs)
+
+---
+
+## ⭐ Support This Project
+
+If this installer saved you time, please consider:
+
+- ⭐ **Star this repository** to help others discover it
+- 🐛 **Report issues** to help improve the installer
+- 📢 **Share** with others who might benefit
+- 🤝 **Contribute** improvements via pull requests
 
 ---
 
