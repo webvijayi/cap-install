@@ -788,7 +788,7 @@ EOF
 				echo "✓ Apache config created"
 				echo ""
 
-				# Detect DirectAdmin/cPanel
+				# Detect control panels
 				if [[ -d /usr/local/directadmin ]]; then
 					echo "⚠️  DirectAdmin detected"
 					echo "   Config placed in /etc/httpd/conf.d/"
@@ -798,6 +798,38 @@ EOF
 				elif [[ -d /usr/local/cpanel ]]; then
 					echo "⚠️  cPanel detected"
 					echo "   Consider using cPanel's Proxy Subdomains feature instead"
+					echo ""
+				elif [[ -d /www/server/panel ]] || [[ -f /etc/init.d/bt ]]; then
+					echo "⚠️  aaPanel/BT-Panel detected"
+					echo "   Config placed in ${APACHE_CONFIG_FILE}"
+					echo "   Note: aaPanel may override Apache configs during updates"
+					echo "   Consider using aaPanel's reverse proxy feature instead"
+					echo ""
+				elif [[ -d /usr/local/psa ]]; then
+					echo "⚠️  Plesk detected"
+					echo "   Consider using Plesk's Apache & Nginx Settings instead"
+					echo "   Or use Plesk's Proxy Mode feature"
+					echo ""
+				elif [[ -d /usr/local/CyberCP ]] || [[ -d /usr/local/lscp ]]; then
+					echo "⚠️  CyberPanel detected"
+					echo "   Note: CyberPanel uses OpenLiteSpeed/LiteSpeed by default"
+					echo "   This Apache config may not be used"
+					echo "   Consider using CyberPanel's reverse proxy feature"
+					echo ""
+				elif [[ -d /opt/webmin ]] || [[ -d /etc/webmin ]]; then
+					echo "⚠️  Webmin/Virtualmin detected"
+					echo "   Config placed in ${APACHE_CONFIG_FILE}"
+					echo "   Reload Apache through Webmin after installation"
+					echo ""
+				elif [[ -d /home/vesta ]] || [[ -d /usr/local/vesta ]]; then
+					echo "⚠️  VestaCP detected"
+					echo "   Config placed in ${APACHE_CONFIG_FILE}"
+					echo "   Note: VestaCP may override configs during updates"
+					echo ""
+				elif [[ -d /usr/local/hestia ]]; then
+					echo "⚠️  HestiaCP detected"
+					echo "   Config placed in ${APACHE_CONFIG_FILE}"
+					echo "   Note: HestiaCP may override configs during updates"
 					echo ""
 				fi
 
@@ -897,6 +929,45 @@ EOF
 				sed -i "s/CAP_DOMAIN_PLACEHOLDER/${CAP_DOMAIN}/g" "$NGINX_CONFIG_FILE"
 
 				echo "✓ Nginx config created"
+				echo ""
+
+				# Detect control panels
+				if [[ -d /usr/local/directadmin ]]; then
+					echo "⚠️  DirectAdmin detected"
+					echo "   Note: DirectAdmin may override Nginx configs"
+					echo ""
+				elif [[ -d /usr/local/cpanel ]]; then
+					echo "⚠️  cPanel detected"
+					echo "   Note: cPanel primarily manages Apache, not Nginx"
+					echo ""
+				elif [[ -d /www/server/panel ]] || [[ -f /etc/init.d/bt ]]; then
+					echo "⚠️  aaPanel/BT-Panel detected"
+					echo "   Config placed in ${NGINX_CONFIG_FILE}"
+					echo "   Note: aaPanel may override Nginx configs during updates"
+					echo "   Consider using aaPanel's reverse proxy feature instead"
+					echo ""
+				elif [[ -d /usr/local/psa ]]; then
+					echo "⚠️  Plesk detected"
+					echo "   Consider using Plesk's Nginx Settings instead"
+					echo ""
+				elif [[ -d /usr/local/CyberCP ]] || [[ -d /usr/local/lscp ]]; then
+					echo "⚠️  CyberPanel detected"
+					echo "   Note: CyberPanel uses OpenLiteSpeed/LiteSpeed by default"
+					echo "   Consider using CyberPanel's reverse proxy feature"
+					echo ""
+				elif [[ -d /opt/webmin ]] || [[ -d /etc/webmin ]]; then
+					echo "⚠️  Webmin/Virtualmin detected"
+					echo "   Config placed in ${NGINX_CONFIG_FILE}"
+					echo ""
+				elif [[ -d /home/vesta ]] || [[ -d /usr/local/vesta ]]; then
+					echo "⚠️  VestaCP detected"
+					echo "   Config placed in ${NGINX_CONFIG_FILE}"
+					echo ""
+				elif [[ -d /usr/local/hestia ]]; then
+					echo "⚠️  HestiaCP detected"
+					echo "   Config placed in ${NGINX_CONFIG_FILE}"
+					echo ""
+				fi
 
 				# Enable site if using sites-available/sites-enabled structure
 				if [[ -n "$NGINX_ENABLED_FILE" ]]; then
@@ -1150,7 +1221,13 @@ mkdir -p "$INSTALL_DIR"
 # Determine external endpoint
 if [[ "$SKIP_NGINX" == "1" && -n "$CAP_DOMAIN" ]]; then
 	# Using external reverse proxy with custom domain
-	EXTERNAL_ENDPOINT="http://${CAP_DOMAIN}"
+	echo ""
+	read -p "Does your reverse proxy have SSL/HTTPS configured? [y/N]: " REVERSE_PROXY_SSL
+	if [[ "$REVERSE_PROXY_SSL" =~ ^[Yy]$ ]]; then
+		EXTERNAL_ENDPOINT="https://${CAP_DOMAIN}"
+	else
+		EXTERNAL_ENDPOINT="http://${CAP_DOMAIN}"
+	fi
 elif [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
 	EXTERNAL_ENDPOINT="https://${DOMAIN}"
 	# Add port if not standard 443
@@ -1198,6 +1275,7 @@ services:
       NODE_ENV: "production"
 EOF
 
+# Add Resend email configuration if enabled (works for all installation modes)
 if [[ "$ENABLE_EMAIL" =~ ^[Yy]$ ]]; then
 	cat >> "$INSTALL_DIR/docker-compose.yml" << EOF
       RESEND_API_KEY: "${RESEND_API_KEY}"
