@@ -664,8 +664,293 @@ echo ""
 # Check for port conflicts BEFORE asking user questions
 echo "Checking for port conflicts..."
 check_existing_mysql
-check_port_available 80 "HTTP (Nginx)"
-check_port_available 443 "HTTPS (Nginx)"
+
+# Check BOTH HTTP and HTTPS ports together to avoid duplicate prompts
+HTTP_PORT_CONFLICT=0
+HTTPS_PORT_CONFLICT=0
+WEB_SERVER_PROCESS=""
+
+if lsof -Pi :80 -sTCP:LISTEN -t >/dev/null 2>&1; then
+	HTTP_PORT_CONFLICT=1
+	WEB_SERVER_PROCESS=$(lsof -Pi :80 -sTCP:LISTEN | tail -n 1)
+fi
+
+if lsof -Pi :443 -sTCP:LISTEN -t >/dev/null 2>&1; then
+	HTTPS_PORT_CONFLICT=1
+	if [[ -z "$WEB_SERVER_PROCESS" ]]; then
+		WEB_SERVER_PROCESS=$(lsof -Pi :443 -sTCP:LISTEN | tail -n 1)
+	fi
+fi
+
+# If either port is in use, handle web server conflict ONCE
+if [[ $HTTP_PORT_CONFLICT -eq 1 ]] || [[ $HTTPS_PORT_CONFLICT -eq 1 ]]; then
+	echo ""
+	echo "================================================================================"
+	if [[ $HTTP_PORT_CONFLICT -eq 1 ]] && [[ $HTTPS_PORT_CONFLICT -eq 1 ]]; then
+		echo "                  ⚠️  WEB SERVER DETECTED (Ports 80 & 443)"
+	elif [[ $HTTP_PORT_CONFLICT -eq 1 ]]; then
+		echo "                  ⚠️  WEB SERVER DETECTED (Port 80)"
+	else
+		echo "                  ⚠️  WEB SERVER DETECTED (Port 443)"
+	fi
+	echo "================================================================================"
+	echo ""
+	echo "A web server is running and may be serving existing websites."
+	echo ""
+	echo "Process using ports:"
+	echo "$WEB_SERVER_PROCESS"
+	echo ""
+
+	# Detect web server type
+	if echo "$WEB_SERVER_PROCESS" | grep -qi "apache\|httpd"; then
+		WEB_SERVER_TYPE="Apache"
+	elif echo "$WEB_SERVER_PROCESS" | grep -qi "nginx"; then
+		WEB_SERVER_TYPE="Nginx"
+	else
+		WEB_SERVER_TYPE="Web Server"
+	fi
+
+	echo "⚠️  WARNING: Stopping ${WEB_SERVER_TYPE} will take down any websites currently running!"
+	echo ""
+	echo "Safe Options:"
+	echo "  1) Run Cap on alternative port 8080 (RECOMMENDED - Safe, non-destructive)"
+	echo "  2) Integrate Cap with ${WEB_SERVER_TYPE} reverse proxy (Auto-configure)"
+	echo "  3) Stop and disable ${WEB_SERVER_TYPE} (DESTRUCTIVE - Will stop ALL websites)"
+	echo "  4) Exit and configure manually"
+	echo ""
+	read -p "Select option [1-4]: " web_server_option
+
+	case "$web_server_option" in
+		1)
+			echo "✓ Using alternative port 8080 for Cap (port 80/443 remains with ${WEB_SERVER_TYPE})"
+			HTTP_PORT=8080
+			HTTPS_PORT=8443
+			;;
+		2)
+			# Handle reverse proxy configuration
+			if echo "$WEB_SERVER_PROCESS" | grep -qi "apache\|httpd"; then
+				# Apache reverse proxy setup (existing code from lines 165-234)
+				echo ""
+				echo "================================================================================"
+				echo "                    Apache Reverse Proxy Configuration"
+				echo "================================================================================"
+				echo ""
+				echo "Cap will install on port 3000 (internal only)."
+				echo "You'll configure Apache to proxy requests to Cap."
+				echo ""
+				read -p "Enter your domain for Cap (e.g., cap.yourdomain.com): " CAP_DOMAIN
+
+				if [[ -z "$CAP_DOMAIN" ]]; then
+					echo "Error: Domain is required for reverse proxy setup."
+					exit 1
+				fi
+
+				# Fixed: Use -d for directory check, not -f
+				if [[ -d /etc/httpd/conf.d ]]; then
+					# RHEL/CentOS/AlmaLinux/Rocky
+					APACHE_CONFIG_FILE="/etc/httpd/conf.d/${CAP_DOMAIN}.conf"
+					APACHE_SERVICE="httpd"
+				elif [[ -d /etc/apache2/sites-available ]]; then
+					# Debian/Ubuntu
+					APACHE_CONFIG_FILE="/etc/apache2/sites-available/${CAP_DOMAIN}.conf"
+					APACHE_SERVICE="apache2"
+				else
+					echo "Error: Could not detect Apache configuration directory"
+					exit 1
+				fi
+
+				echo ""
+				echo "Creating Apache configuration at: $APACHE_CONFIG_FILE"
+
+				# Create parent directory if needed
+				mkdir -p "$(dirname "$APACHE_CONFIG_FILE")"
+
+				cat > "$APACHE_CONFIG_FILE" << EOF
+<VirtualHost *:80>
+    ServerName ${CAP_DOMAIN}
+
+    # Enable proxy modules
+    ProxyPreserveHost On
+    ProxyPass / http://localhost:3000/
+    ProxyPassReverse / http://localhost:3000/
+
+    # WebSocket support (required for Cap)
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    RewriteRule ^/?(.*) "ws://localhost:3000/\$1" [P,L]
+
+    ErrorLog \${APACHE_LOG_DIR}/${CAP_DOMAIN}-error.log
+    CustomLog \${APACHE_LOG_DIR}/${CAP_DOMAIN}-access.log combined
+</VirtualHost>
+EOF
+
+				echo "✓ Apache config created"
+				echo ""
+
+				# Detect DirectAdmin/cPanel
+				if [[ -d /usr/local/directadmin ]]; then
+					echo "⚠️  DirectAdmin detected"
+					echo "   Config placed in /etc/httpd/conf.d/"
+					echo "   Note: DirectAdmin may override configs during updates"
+					echo "   Consider using DirectAdmin's Custom HTTPD Configuration feature"
+					echo ""
+				elif [[ -d /usr/local/cpanel ]]; then
+					echo "⚠️  cPanel detected"
+					echo "   Consider using cPanel's Proxy Subdomains feature instead"
+					echo ""
+				fi
+
+				echo "Enabling required Apache modules..."
+
+				# OS-specific module enablement
+				if command -v a2enmod >/dev/null 2>&1; then
+					# Debian/Ubuntu
+					a2enmod proxy >/dev/null 2>&1
+					a2enmod proxy_http >/dev/null 2>&1
+					a2enmod proxy_wstunnel >/dev/null 2>&1
+					a2enmod rewrite >/dev/null 2>&1
+					a2ensite "${CAP_DOMAIN}.conf" >/dev/null 2>&1
+					systemctl reload apache2 >/dev/null 2>&1 || systemctl reload httpd >/dev/null 2>&1
+					echo "✓ Apache modules enabled and configuration loaded"
+				else
+					# RHEL/CentOS/AlmaLinux
+					echo "⚠️  Manual step required for RHEL/AlmaLinux:"
+					echo "   Ensure these modules are loaded in /etc/httpd/conf.modules.d/"
+					echo "     - mod_proxy.so"
+					echo "     - mod_proxy_http.so"
+					echo "     - mod_proxy_wstunnel.so"
+					echo "     - mod_rewrite.so"
+					echo "   Then run: systemctl reload httpd"
+				fi
+
+				echo ""
+				echo "✓ Cap will be accessible at: http://${CAP_DOMAIN}"
+				echo ""
+				echo "Continuing with installation (Cap on internal port 3000)..."
+				HTTP_PORT=3000
+				HTTPS_PORT=3001
+				SKIP_NGINX=1
+			else
+				# Nginx reverse proxy setup (existing code from lines 286-371)
+				echo ""
+				echo "================================================================================"
+				echo "                    Nginx Reverse Proxy Configuration"
+				echo "================================================================================"
+				echo ""
+				echo "Cap will install on port 3000 (internal only)."
+				echo "You'll configure Nginx to proxy requests to Cap."
+				echo ""
+				read -p "Enter your domain for Cap (e.g., cap.yourdomain.com): " CAP_DOMAIN
+
+				if [[ -z "$CAP_DOMAIN" ]]; then
+					echo "Error: Domain is required for reverse proxy setup."
+					exit 1
+				fi
+
+				NGINX_CONFIG_FILE="/etc/nginx/sites-available/${CAP_DOMAIN}"
+				NGINX_ENABLED_FILE="/etc/nginx/sites-enabled/${CAP_DOMAIN}"
+
+				# Check for different nginx config locations
+				if [[ ! -d /etc/nginx/sites-available ]]; then
+					NGINX_CONFIG_FILE="/etc/nginx/conf.d/${CAP_DOMAIN}.conf"
+					NGINX_ENABLED_FILE=""
+				fi
+
+				echo ""
+				echo "Creating Nginx configuration at: $NGINX_CONFIG_FILE"
+
+				# Create parent directory if needed
+				mkdir -p "$(dirname "$NGINX_CONFIG_FILE")"
+
+				cat > "$NGINX_CONFIG_FILE" << 'EOF'
+server {
+    listen 80;
+    server_name CAP_DOMAIN_PLACEHOLDER;
+
+    client_max_body_size 100M;
+
+    location / {
+        proxy_pass http://localhost:3000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # MinIO S3 endpoint
+    location /s3 {
+        proxy_pass http://localhost:9000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+EOF
+
+				# Replace placeholder with actual domain
+				sed -i "s/CAP_DOMAIN_PLACEHOLDER/${CAP_DOMAIN}/g" "$NGINX_CONFIG_FILE"
+
+				echo "✓ Nginx config created"
+
+				# Enable site if using sites-available/sites-enabled structure
+				if [[ -n "$NGINX_ENABLED_FILE" ]]; then
+					ln -sf "$NGINX_CONFIG_FILE" "$NGINX_ENABLED_FILE" 2>/dev/null
+				fi
+
+				# Test and reload nginx
+				if nginx -t >/dev/null 2>&1; then
+					systemctl reload nginx >/dev/null 2>&1
+					echo "✓ Nginx configuration loaded"
+				else
+					echo "⚠️  Nginx config test failed. Please check manually:"
+					echo "   nginx -t"
+					echo "   systemctl reload nginx"
+				fi
+
+				echo ""
+				echo "✓ Cap will be accessible at: http://${CAP_DOMAIN}"
+				echo ""
+				echo "Continuing with installation (Cap on internal port 3000)..."
+				HTTP_PORT=3000
+				HTTPS_PORT=3001
+				SKIP_NGINX=1
+			fi
+			;;
+		3)
+			echo ""
+			echo "⚠️  FINAL WARNING: This will STOP ${WEB_SERVER_TYPE} and affect all websites!"
+			read -p "Type 'YES I UNDERSTAND' to confirm: " confirm
+			if [[ "$confirm" == "YES I UNDERSTAND" ]]; then
+				echo "Stopping ${WEB_SERVER_TYPE}..."
+				if echo "$WEB_SERVER_PROCESS" | grep -qi "apache\|httpd"; then
+					systemctl stop apache2 2>/dev/null || systemctl stop httpd 2>/dev/null
+					systemctl disable apache2 2>/dev/null || systemctl disable httpd 2>/dev/null
+				else
+					systemctl stop nginx
+					systemctl disable nginx
+				fi
+				echo "${WEB_SERVER_TYPE} stopped and disabled."
+			else
+				echo "Cancelled. Exiting."
+				exit 1
+			fi
+			;;
+		4)
+			echo "Exiting. Please configure manually."
+			exit 0
+			;;
+		*)
+			echo "Invalid option. Exiting."
+			exit 1
+			;;
+	esac
+fi
 
 # Check MinIO ports (9000 for API, 9001 for Console)
 if lsof -Pi :9000 -sTCP:LISTEN -t >/dev/null 2>&1; then
