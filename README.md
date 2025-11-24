@@ -37,42 +37,60 @@ The script will automatically detect your permissions and offer appropriate inst
 
 ## 🎉 What's New - Production-Ready v2.0
 
-### Critical Fixes That Make Cap "Just Work"
+### Critical Fix: HTTPS Video Playback
 
-This installer now includes production-tested fixes that solve the most common Cap.so deployment issues:
+This installer solves the most common Cap.so self-hosting issue: **video playback fails with HTTPS**.
 
-#### ✅ **Videos Upload Successfully**
-**Problem Fixed**: Desktop app uploads were failing with cryptic "CredentialsProviderError"
-**What we fixed**: Added all required S3 environment variables that Cap needs
-**Result**: Desktop app uploads work perfectly on first try
+#### The Problem
 
-#### ✅ **Videos Play in Browser**
-**Problem Fixed**: Uploaded videos showed "Unsupported Format" error in web player
-**What we fixed**: Configured proper HTTPS subdomain for video storage (s3.yourdomain.com)
-**Result**: Videos play smoothly in all browsers without errors
+Cap's official docker-compose template is designed for local development:
+```yaml
+S3_PUBLIC_ENDPOINT: http://localhost:3902  # Works locally
+```
 
-#### ✅ **No More Security Errors**
-**Problem Fixed**: Browser blocked videos with "Mixed content" warnings (HTTPS page loading HTTP videos)
-**What we fixed**: S3 subdomain uses HTTPS, matching your main site's security
-**Result**: No browser warnings, fully secure video playback
+When deployed in production with HTTPS:
+- Main site: `https://cap.yourdomain.com` ✅
+- Videos: `http://yourdomain.com:9000/video.mp4` ❌ **BLOCKED by browser!**
 
-#### ✅ **Zero Manual Configuration**
-**What we automated**:
-- S3 credentials (properly named variables Cap expects)
-- Video storage subdomain (s3.yourdomain.com)
-- SSL certificates (auto-issued for both domains)
-- All environment variables (Cap's internal requirements met)
+Browsers block HTTP content on HTTPS pages (mixed content security), causing:
+- "Unsupported Format" errors in video player
+- Desktop app uploads may fail
+- Browser console shows security warnings
 
-**You just need to**:
+#### The Solution: S3 Subdomain Pattern
+
+This installer implements the industry-standard approach (same pattern AWS, Railway, and Cloudflare use):
+
+**Automated Configuration:**
+- Creates `s3.yourdomain.com` subdomain for video storage
+- Issues SSL certificate for the subdomain
+- Configures reverse proxy (Nginx/Apache) to MinIO
+- Sets `S3_PUBLIC_ENDPOINT: https://s3.yourdomain.com`
+
+**Result:**
+- ✅ Videos upload successfully from desktop app
+- ✅ Videos play smoothly in browser
+- ✅ No mixed content security warnings
+- ✅ Production-ready HTTPS throughout
+
+#### Zero Manual Configuration
+
+**You just need to:**
 1. Run the installer
-2. Add the DNS records it shows you (copy-paste ready)
+2. Add the two DNS records it shows you (copy-paste ready)
 3. Everything works!
+
+**The installer handles:**
+- Detecting HTTPS deployment
+- Configuring S3 subdomain automatically
+- Issuing SSL certificates for both domains
+- Setting all Cap environment variables correctly
 
 ### Why This Matters
 
-**Before these fixes**: Users had to manually debug S3 errors, figure out environment variables, and troubleshoot video playback issues.
+**Without this fix**: The official template works great for local development but fails in production with HTTPS. You'd need to manually figure out the subdomain pattern, SSL certificates, and environment variables.
 
-**After these fixes**: The installer handles everything automatically. Cap works exactly like the hosted version at cap.so.
+**With this fix**: The installer detects your setup and configures everything automatically. Cap works exactly like the hosted version at cap.so.
 
 ---
 
@@ -465,22 +483,25 @@ The script automatically configures all required variables:
 
 **S3 Storage (Video Storage):**
 
-All S3 variables are now automatically configured with correct values:
+All S3 variables are automatically configured with correct values:
 
 - `CAP_AWS_BUCKET` - Storage bucket name (always "cap")
 - `CAP_AWS_REGION` - Region setting (always "us-east-1" - works with MinIO)
-- `CAP_AWS_ACCESS_KEY` - S3 credentials (what Cap actually looks for) ✨
-- `CAP_AWS_SECRET_KEY` - S3 secret (what Cap actually looks for) ✨
-- `CAP_AWS_ENDPOINT` - Internal S3 connection to MinIO
-- `S3_INTERNAL_ENDPOINT` - Server-to-storage communication
-- `S3_PUBLIC_ENDPOINT` - External video access (uses s3 subdomain) ✨
-- `NEXT_PUBLIC_S3_ENDPOINT` - Frontend video player endpoint ✨
+- `CAP_AWS_ACCESS_KEY` - S3 credentials (what Cap's code requires)
+- `CAP_AWS_SECRET_KEY` - S3 secret (what Cap's code requires)
+- `CAP_AWS_ENDPOINT` - Fallback S3 endpoint (used when PUBLIC/INTERNAL not set)
+- `S3_INTERNAL_ENDPOINT` - Server-side S3 operations (HTTP inside Docker network)
+- `S3_PUBLIC_ENDPOINT` - **CRITICAL**: Browser video playback and desktop uploads
 - Auto-generated secure access keys
 
-**✨ New/Fixed Variables** - These solve the upload and playback issues:
-- Cap's code specifically checks for `CAP_AWS_ACCESS_KEY` (not `AWS_ACCESS_KEY_ID`)
-- Public endpoint now uses your s3 subdomain for proper HTTPS
-- All AWS SDK compatibility variables included (prevents metadata errors)
+**Why S3_PUBLIC_ENDPOINT Matters:**
+
+When using HTTPS for your main site, videos must also use HTTPS to avoid browser security blocks (mixed content errors). The installer automatically:
+- Creates s3.yourdomain.com subdomain for video storage
+- Configures HTTPS with SSL certificate
+- Sets `S3_PUBLIC_ENDPOINT` to `https://s3.yourdomain.com`
+
+This is the key fix that makes video playback work in production.
 
 ### Optional: Email Login Links (Resend)
 

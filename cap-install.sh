@@ -1287,28 +1287,31 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Database Configuration
       DATABASE_URL: "mysql://capuser:${MYSQL_PASSWORD}@cap-mysql:3306/planetscale"
+
+      # Application URLs
       WEB_URL: "${EXTERNAL_ENDPOINT}"
       NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
       NEXTAUTH_URL: "${EXTERNAL_ENDPOINT}"
       NEXT_PUBLIC_URL: "${EXTERNAL_ENDPOINT}"
+
+      # S3 Storage Configuration
+      # Cap requires these specific variable names for S3 access
       CAP_AWS_BUCKET: "cap"
       CAP_AWS_REGION: "us-east-1"
       CAP_AWS_ACCESS_KEY: "${S3_ACCESS_KEY_ID}"
       CAP_AWS_SECRET_KEY: "${S3_SECRET_ACCESS_KEY}"
-      CAP_AWS_ENDPOINT: "http://cap-minio:9000"
-      S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID}"
-      S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY}"
-      AWS_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID}"
-      AWS_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY}"
-      AWS_SDK_LOAD_CONFIG: "0"
-      AWS_EC2_METADATA_DISABLED: "true"
-      S3_BUCKET: "cap"
-      S3_REGION: "us-east-1"
-      S3_ENDPOINT: "http://cap-minio:9000"
+      CAP_AWS_ENDPOINT: "http://cap-minio:9000"  # Fallback for S3 endpoints
+
+      # S3_INTERNAL_ENDPOINT: Used for server-side S3 operations (always HTTP inside Docker network)
       S3_INTERNAL_ENDPOINT: "http://cap-minio:9000"
+
+      # S3_PUBLIC_ENDPOINT: Used for browser video playback and desktop app uploads
+      # CRITICAL: Must use HTTPS for production to avoid mixed content errors
       S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_URL}"
-      NEXT_PUBLIC_S3_ENDPOINT: "${S3_PUBLIC_URL}"
+
+      # Environment
       NODE_ENV: "production"
 EOF
 
