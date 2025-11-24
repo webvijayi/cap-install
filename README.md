@@ -35,6 +35,47 @@ The script will automatically detect your permissions and offer appropriate inst
 
 ---
 
+## 🎉 What's New - Production-Ready v2.0
+
+### Critical Fixes That Make Cap "Just Work"
+
+This installer now includes production-tested fixes that solve the most common Cap.so deployment issues:
+
+#### ✅ **Videos Upload Successfully**
+**Problem Fixed**: Desktop app uploads were failing with cryptic "CredentialsProviderError"
+**What we fixed**: Added all required S3 environment variables that Cap needs
+**Result**: Desktop app uploads work perfectly on first try
+
+#### ✅ **Videos Play in Browser**
+**Problem Fixed**: Uploaded videos showed "Unsupported Format" error in web player
+**What we fixed**: Configured proper HTTPS subdomain for video storage (s3.yourdomain.com)
+**Result**: Videos play smoothly in all browsers without errors
+
+#### ✅ **No More Security Errors**
+**Problem Fixed**: Browser blocked videos with "Mixed content" warnings (HTTPS page loading HTTP videos)
+**What we fixed**: S3 subdomain uses HTTPS, matching your main site's security
+**Result**: No browser warnings, fully secure video playback
+
+#### ✅ **Zero Manual Configuration**
+**What we automated**:
+- S3 credentials (properly named variables Cap expects)
+- Video storage subdomain (s3.yourdomain.com)
+- SSL certificates (auto-issued for both domains)
+- All environment variables (Cap's internal requirements met)
+
+**You just need to**:
+1. Run the installer
+2. Add the DNS records it shows you (copy-paste ready)
+3. Everything works!
+
+### Why This Matters
+
+**Before these fixes**: Users had to manually debug S3 errors, figure out environment variables, and troubleshoot video playback issues.
+
+**After these fixes**: The installer handles everything automatically. Cap works exactly like the hosted version at cap.so.
+
+---
+
 ## 🛡️ Production Server Safety
 
 **IMPORTANT**: This installer is designed to be **safe and non-destructive** on production servers running existing websites.
@@ -202,18 +243,31 @@ Cap uses **6-digit verification codes** for authentication (no passwords require
 
 ## 🎬 Recordings Storage
 
+### How Video Storage Works
+
+**Simple Explanation**:
+- Videos are stored in MinIO (S3-compatible object storage)
+- They're accessed via your S3 subdomain (e.g., `s3.cap.example.com`)
+- Everything is encrypted with HTTPS when using SSL
+- Desktop app uploads directly to this secure endpoint
+- Web player streams videos from the same secure endpoint
+
 ### Storage Location
 
 **Full Install Mode:**
 ```
 Physical: /var/lib/docker/volumes/cap_cap-minio-data/_data
-Access via: MinIO Console
+Access via: MinIO Console or S3 subdomain
+Public URL: https://s3.your-domain.com (if using domain+SSL)
+          or http://your-ip:9000 (if using IP)
 ```
 
 **User Mode:**
 ```
 Physical: /var/lib/docker/volumes/cap_cap-minio-data/_data
-Access via: MinIO Console
+Access via: MinIO Console or S3 subdomain
+Public URL: https://s3.your-domain.com:8443 (if using domain+SSL)
+          or http://your-ip:9000 (if using IP)
 ```
 
 ### MinIO Console Access
@@ -225,6 +279,19 @@ Access via: MinIO Console
 - URL: `http://your-server.com:8080/minio-console`
 
 **Credentials:** Found in your credentials file
+
+### Video Access URLs
+
+When SSL is enabled with a domain, videos are served via:
+```
+https://s3.cap.example.com/cap/[video-id]/video.mp4
+```
+
+**Why this matters**:
+- ✅ Fully encrypted video streaming
+- ✅ No mixed content browser errors
+- ✅ Works with desktop app uploads
+- ✅ Professional, production-ready setup
 
 ---
 
@@ -265,19 +332,86 @@ bash cap-install.sh
 
 ### Using a Domain (Recommended for Production)
 
-1. **Point your domain to server:**
-   - Type: `A`
-   - Name: `@` (or subdomain)
-   - Value: Your server IP
-   - TTL: `300`
+#### 📡 DNS Records You'll Need
 
-2. **Enable SSL during installation:**
-   ```
-   Enable SSL? [y/N]: y
-   Email for Let's Encrypt: your@email.com
-   ```
+When using a domain with SSL, Cap requires **TWO DNS records**:
 
-3. **SSL certificate renews automatically** via certbot
+**1. Main Domain** (for the web interface)
+```
+Type: A
+Name: cap (or your subdomain)
+Value: YOUR_SERVER_IP
+TTL: 300
+
+Example: cap.example.com → 192.0.2.100
+```
+
+**2. S3 Subdomain** (for video storage) ⚠️ **IMPORTANT**
+```
+Type: A
+Name: s3.cap (adds s3. prefix to your domain)
+Value: YOUR_SERVER_IP (same as main domain)
+TTL: 300
+
+Example: s3.cap.example.com → 192.0.2.100
+```
+
+#### Why You Need the S3 Subdomain
+
+**In Simple Terms**: Videos need their own secure address, separate from your main site.
+
+**The Technical Reason**:
+- Your main site runs on HTTPS (secure): `https://cap.example.com`
+- Browsers block HTTP (insecure) content on HTTPS pages
+- The S3 subdomain provides HTTPS for videos: `https://s3.cap.example.com`
+- Result: No security errors, videos "just work"
+
+**What Happens Without It**:
+❌ Desktop app uploads fail
+❌ Video playback shows "Unsupported Format"
+❌ Browser blocks videos with "Mixed content" error
+
+**With S3 Subdomain**:
+✅ Desktop uploads work perfectly
+✅ Videos play in all browsers
+✅ Fully secure HTTPS throughout
+✅ SSL certificate auto-issued for both domains
+
+#### Setup Process
+
+**During installation, the script will show you exactly what to add**:
+
+```
+📡 DNS SETUP REQUIRED:
+   Point your domain 'cap.example.com' to this server's IP: 192.0.2.100
+   Add an A record:
+     Type: A
+     Name: @ (or subdomain)
+     Value: 192.0.2.100
+     TTL: 300
+
+   ⚠️  IMPORTANT: Also add S3 subdomain for video storage:
+   Add another A record:
+     Type: A
+     Name: s3.cap.example.com
+     Value: 192.0.2.100
+     TTL: 300
+
+   SSL certificate will be automatically issued for both:
+   - cap.example.com
+   - s3.cap.example.com
+```
+
+**Just copy-paste these into your DNS provider** (Cloudflare, Namecheap, etc.)
+
+#### Enable SSL During Installation
+
+```
+Enable SSL? [y/N]: y
+Email for Let's Encrypt: your@email.com
+```
+
+**SSL certificate renews automatically** via certbot for both domains
 
 ### Using IP Address (Quick Setup)
 
@@ -329,11 +463,24 @@ The script automatically configures all required variables:
 - `NEXTAUTH_SECRET` - Authentication secret
 - `NODE_ENV` - Set to production
 
-**S3 Storage:**
-- `CAP_AWS_BUCKET` - Storage bucket name
-- `CAP_AWS_REGION` - Region (works with MinIO)
-- `S3_ENDPOINT` - MinIO endpoint
-- Auto-generated access keys
+**S3 Storage (Video Storage):**
+
+All S3 variables are now automatically configured with correct values:
+
+- `CAP_AWS_BUCKET` - Storage bucket name (always "cap")
+- `CAP_AWS_REGION` - Region setting (always "us-east-1" - works with MinIO)
+- `CAP_AWS_ACCESS_KEY` - S3 credentials (what Cap actually looks for) ✨
+- `CAP_AWS_SECRET_KEY` - S3 secret (what Cap actually looks for) ✨
+- `CAP_AWS_ENDPOINT` - Internal S3 connection to MinIO
+- `S3_INTERNAL_ENDPOINT` - Server-to-storage communication
+- `S3_PUBLIC_ENDPOINT` - External video access (uses s3 subdomain) ✨
+- `NEXT_PUBLIC_S3_ENDPOINT` - Frontend video player endpoint ✨
+- Auto-generated secure access keys
+
+**✨ New/Fixed Variables** - These solve the upload and playback issues:
+- Cap's code specifically checks for `CAP_AWS_ACCESS_KEY` (not `AWS_ACCESS_KEY_ID`)
+- Public endpoint now uses your s3 subdomain for proper HTTPS
+- All AWS SDK compatibility variables included (prevents metadata errors)
 
 ### Optional: Email Login Links (Resend)
 
