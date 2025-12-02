@@ -1242,6 +1242,34 @@ else
 	fi
 fi
 
+# Determine S3 public URL for video playback and desktop app uploads
+# Using s3 subdomain for proper HTTPS support and to avoid mixed content errors
+if [[ ! "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	# Using a domain name - create s3 subdomain
+	if [[ "$SKIP_NGINX" == "1" && -n "$CAP_DOMAIN" ]]; then
+		# Using custom domain with external reverse proxy
+		S3_SUBDOMAIN="s3.${CAP_DOMAIN}"
+		if [[ "$REVERSE_PROXY_SSL" =~ ^[Yy]$ ]]; then
+			S3_PUBLIC_URL="https://${S3_SUBDOMAIN}"
+		else
+			S3_PUBLIC_URL="http://${S3_SUBDOMAIN}"
+		fi
+	elif [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
+		# Using domain with SSL
+		S3_SUBDOMAIN="s3.${DOMAIN}"
+		S3_PUBLIC_URL="https://${S3_SUBDOMAIN}"
+		if [[ $HTTPS_PORT -ne 443 ]]; then
+			S3_PUBLIC_URL="${S3_PUBLIC_URL}:${HTTPS_PORT}"
+		fi
+	else
+		# Using domain without SSL - expose MinIO port directly
+		S3_PUBLIC_URL="http://${DOMAIN}:9000"
+	fi
+else
+	# Using IP address - expose MinIO port directly
+	S3_PUBLIC_URL="http://${DOMAIN}:9000"
+fi
+
 # Determine MySQL port (use 3307 if 3306 is taken)
 MYSQL_PORT=3306
 if [[ -n "$USE_CUSTOM_MYSQL_PORT" ]]; then
@@ -1259,19 +1287,31 @@ services:
     ports:
       - "3000:3000"
     environment:
+      # Database Configuration
       DATABASE_URL: "mysql://capuser:${MYSQL_PASSWORD}@cap-mysql:3306/planetscale"
+
+      # Application URLs
       WEB_URL: "${EXTERNAL_ENDPOINT}"
       NEXTAUTH_SECRET: "${NEXTAUTH_SECRET}"
       NEXTAUTH_URL: "${EXTERNAL_ENDPOINT}"
       NEXT_PUBLIC_URL: "${EXTERNAL_ENDPOINT}"
+
+      # S3 Storage Configuration
+      # Cap requires these specific variable names for S3 access
       CAP_AWS_BUCKET: "cap"
       CAP_AWS_REGION: "us-east-1"
-      S3_ACCESS_KEY_ID: "${S3_ACCESS_KEY_ID}"
-      S3_SECRET_ACCESS_KEY: "${S3_SECRET_ACCESS_KEY}"
-      S3_BUCKET: "cap"
-      S3_REGION: "us-east-1"
-      S3_ENDPOINT: "http://cap-minio:9000"
-      NEXT_PUBLIC_S3_ENDPOINT: "${EXTERNAL_ENDPOINT}/s3"
+      CAP_AWS_ACCESS_KEY: "${S3_ACCESS_KEY_ID}"
+      CAP_AWS_SECRET_KEY: "${S3_SECRET_ACCESS_KEY}"
+      CAP_AWS_ENDPOINT: "http://cap-minio:9000"  # Fallback for S3 endpoints
+
+      # S3_INTERNAL_ENDPOINT: Used for server-side S3 operations (always HTTP inside Docker network)
+      S3_INTERNAL_ENDPOINT: "http://cap-minio:9000"
+
+      # S3_PUBLIC_ENDPOINT: Used for browser video playback and desktop app uploads
+      # CRITICAL: Must use HTTPS for production to avoid mixed content errors
+      S3_PUBLIC_ENDPOINT: "${S3_PUBLIC_URL}"
+
+      # Environment
       NODE_ENV: "production"
 EOF
 
@@ -1858,7 +1898,7 @@ if [ $SERVICES_OK -eq 1 ]; then
 	fi
 
 	# DNS instructions if domain was used
-	if [[ ! "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	if [[ ! "$DOMAIN" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 		echo "📡 DNS SETUP REQUIRED:"
 		echo "   Point your domain '${DOMAIN}' to this server's IP: ${PUBLIC_IP}"
 		echo "   Add an A record:"
@@ -1867,8 +1907,30 @@ if [ $SERVICES_OK -eq 1 ]; then
 		echo "     Value: ${PUBLIC_IP}"
 		echo "     TTL: 300"
 		echo ""
+
+		# Add S3 subdomain instructions if using subdomain
+		if [[ -n "$S3_SUBDOMAIN" ]]; then
+			echo "   ⚠️  IMPORTANT: Also add S3 subdomain for video storage:"
+			echo "   Add another A record:"
+			echo "     Type: A"
+			echo "     Name: s3.${DOMAIN}"
+			echo "     Value: ${PUBLIC_IP}"
+			echo "     TTL: 300"
+			echo ""
+			echo "   This subdomain is required for:"
+			echo "   - Video playback in web browser"
+			echo "   - Desktop app uploads"
+			echo "   - Proper HTTPS support (avoids mixed content errors)"
+			echo ""
+		fi
+
 		if [[ "$ENABLE_SSL" =~ ^[Yy]$ ]]; then
 			echo "   SSL will activate automatically once DNS propagates (up to 48 hours)"
+			if [[ -n "$S3_SUBDOMAIN" ]]; then
+				echo "   SSL certificate will be automatically issued for both:"
+				echo "   - ${DOMAIN}"
+				echo "   - ${S3_SUBDOMAIN}"
+			fi
 			echo ""
 		else
 			echo "💡 TIP: You can enable SSL later by re-running this script"
